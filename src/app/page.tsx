@@ -239,7 +239,7 @@ export default function HomePage() {
                     ) : s.type === "website" && s.url ? (
                       <>&#128279; <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb" }}>{s.title || s.url}</a></>
                     ) : (
-                      <>&#128221; {s.desc}
+                      <>&#128221; {s.desc}</>
                     )}
                   </span>
                 ))}
