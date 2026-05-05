@@ -1,218 +1,128 @@
 /**
- * OpenRouter API 调用封装
- * 纯 fetch 实现，无任何第三方 AI SDK 依赖
- * API Docs: https://openrouter.ai/docs
+ * OpenRouter API — 纯 fetch，无任何第三方 AI SDK
+ * 已知 Vercel Node 24 运行时对 Unicode 头有问题，所有 header 强制 ASCII
  */
 
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+const OR_BASE = "https://openrouter.ai/api/v1"
 
-interface OpenRouterMessage {
-  role: "system" | "user" | "assistant"
-  content: string
-}
-
-interface OpenRouterResponse {
-  choices: Array<{
-    message: { content: string }
-  }>
-  usage?: {
-    total_tokens: number
-  }
-}
-
-async function openRouterChatCompletion(
-  messages: OpenRouterMessage[],
-  model: string = "anthropic/claude-3.5-haiku",
-  maxTokens: number = 300
+async function chatComplete(
+  messages: Array<{ role: string; content: string }>,
+  model: string,
+  maxTokens: number
 ): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set")
 
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY environment variable is not set")
-  }
-
-  const referer = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
+  const vercelUrl = process.env.VERCEL_URL
+  // 强制 ASCII referer，避免 Node 24 TextEncoder 对 Unicode 的 bug
+  const referer = vercelUrl
+    ? `https://${vercelUrl.replace(/[^\x00-\x7F]/g, '')}`
     : "https://icebreaker-demo.vercel.app"
 
-  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+  const resp = await fetch(`${OR_BASE}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": referer,
-      "X-Title": "海外客户破冰助手",
+      // 改用 ASCII only 的 title，避免 TextEncoder 异常
+      "X-Title": "Icebreaker Demo",
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: maxTokens,
-    }),
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
   })
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`OpenRouter API error ${response.status}: ${errorText}`)
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "")
+    throw new Error(`OpenRouter ${resp.status}: ${body.slice(0, 200)}`)
   }
 
-  const data = await response.json() as OpenRouterResponse
-  const content = data.choices?.[0]?.message?.content
-  if (!content) {
-    throw new Error("OpenRouter returned empty response")
+  const data = await resp.json() as {
+    choices?: Array<{ message?: { content?: string } }>
   }
+  const content = data.choices?.[0]?.message?.content
+  if (!content) throw new Error("OpenRouter returned empty response")
   return content
 }
 
-// ─── 内置模型列表（供模型管理页面使用）──────────────────────
+// ─── 内置模型 ───────────────────────────────────────────────
 
 export const BUILTIN_MODELS = [
-  { id: "anthropic/claude-3.5-haiku", name: "Claude 3.5 Haiku", provider: "Anthropic", speed: "最快", cost: "最低" },
-  { id: "anthropic/claude-3-haiku", name: "Claude 3 Haiku", provider: "Anthropic", speed: "快", cost: "低" },
-  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", speed: "快", cost: "低" },
-  { id: "google/gemini-2.0-flash", name: "Gemini 2.0 Flash", provider: "Google", speed: "很快", cost: "低" },
-  { id: "meta-llama/llama-3.1-8b-instruct", name: "Llama 3.1 8B", provider: "Meta", speed: "快", cost: "极低" },
-  { id: "deepseek/deepseek-chat-v3", name: "DeepSeek Chat V3", provider: "DeepSeek", speed: "快", cost: "极低" },
-  { id: "mistralai/mistral-7b-instruct", name: "Mistral 7B", provider: "Mistral", speed: "快", cost: "低" },
-  { id: "qwen/qwen2.5-72b-instruct", name: "Qwen 2.5 72B", provider: "Alibaba", speed: "中", cost: "中" },
-  { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", speed: "中", cost: "高" },
-  { id: "anthropic/claude-3-opus", name: "Claude 3 Opus", provider: "Anthropic", speed: "慢", cost: "最高" },
+  { id: "anthropic/claude-3.5-haiku",  name: "Claude 3.5 Haiku",  provider: "Anthropic", speed: "最快",  cost: "最低" },
+  { id: "anthropic/claude-3-haiku",    name: "Claude 3 Haiku",    provider: "Anthropic", speed: "快",    cost: "低"   },
+  { id: "openai/gpt-4o-mini",          name: "GPT-4o Mini",        provider: "OpenAI",    speed: "快",    cost: "低"   },
+  { id: "google/gemini-2.0-flash",     name: "Gemini 2.0 Flash",   provider: "Google",    speed: "很快",  cost: "低"   },
+  { id: "meta-llama/llama-3.1-8b-instruct", name: "Llama 3.1 8B",  provider: "Meta",      speed: "快",    cost: "极低" },
+  { id: "deepseek/deepseek-chat-v3",   name: "DeepSeek Chat V3",   provider: "DeepSeek",  speed: "快",    cost: "极低" },
+  { id: "mistralai/mistral-7b-instruct",name: "Mistral 7B",        provider: "Mistral",   speed: "快",    cost: "低"   },
+  { id: "qwen/qwen2.5-72b-instruct",   name: "Qwen 2.5 72B",      provider: "Alibaba",   speed: "中",    cost: "中"   },
+  { id: "openai/gpt-4o",               name: "GPT-4o",              provider: "OpenAI",    speed: "中",    cost: "高"   },
+  { id: "anthropic/claude-3-opus",     name: "Claude 3 Opus",      provider: "Anthropic", speed: "慢",    cost: "最高" },
 ]
 
-// ─── 公司分析 ───────────────────────────────────────────────
+// ─── Prompts ─────────────────────────────────────────────────
 
-const COMPANY_ANALYSIS_PROMPT = `You are a B2B company research analyst. Based on the following information, analyze this company and respond ONLY with valid JSON (no markdown, no explanation).
+const COMPANY_PROMPT = `You are a B2B company research analyst. Respond ONLY with valid JSON.
 
-Input information:
-- Company name: {companyName}
-- Website content (if available): {websiteContent}
+Company: {name}
+Website content: {content}
 
-Respond with this exact JSON structure:
-{{
-  "name": "Official company name or inferred from input",
-  "main_business": "One sentence describing their core business in Chinese (e.g. '建材批发商' / '工程施工服务商' / '管道制造商' / '分销商')",
-  "products": ["product category 1", "product category 2", "product category 3"],
-  "scale": "Estimated company scale in Chinese (e.g. '小型批发商' / '中型工程商' / '大型制造商')",
-  "country": "The country this company is based in, in Chinese (e.g. '美国' / '波兰' / '法国'). Infer from company name and website content.",
-  "country_code": "ISO 3166-1 alpha-2 country code in uppercase (e.g. 'US' / 'PL' / 'FR'). If you're unsure, return 'UNKNOWN'.",
-  "confidence": 0.0-1.0 (how confident are you in this analysis)
-}}
+JSON:
+{"name":"...","main_business":"...","products":["...","..."],"scale":"...","country":"...","country_code":"...","confidence":0.0}`
 
-If website content is empty or minimal, base your analysis on the company name alone and set confidence below 0.6.
-Only respond with the JSON. No markdown formatting.`
+const ICEBREAKER_PROMPT = `Write a 100-150 word professional cold outreach opener in {lang}.
 
-// ─── 破冰话术 ───────────────────────────────────────────────
+Company: {company}
+Business: {biz}
+Products: {products}
+Country: {country}
+Standards: {stds}
 
-const ICEBREAKER_PROMPT = `You are a senior B2B piping & building materials sales consultant.
+Write ONLY the opener text.`
 
-Generate a natural, professional cold outreach opener (100-150 words) based on the following client information:
+// ─── 导出 ────────────────────────────────────────────────────
 
-Client Company: {companyName}
-Main Business: {mainBusiness}
-Product Types: {products}
-Scale: {scale}
-Target Country: {country}
-Standard System: {standardSystem}
-Common Standards: {standardCodes}
+export async function analyzeCompany(
+  name: string,
+  content: string,
+  model: string
+) {
+  const prompt = COMPANY_PROMPT
+    .replace("{name}", name)
+    .replace("{content}", content || "（no website content）")
 
-Requirements:
-1. Professional but not cold — make the client feel understood
-2. Reference the local market standards naturally (show you understand their market)
-3. Include information value — not just pleasantries
-4. Naturally lead into introducing pipe products suitable for their market
-5. Write in {language}
-
-Respond ONLY with the opener text, nothing else.`
-
-// ─── 导出方法 ───────────────────────────────────────────────
-
-export async function analyzeCompanyWithAI(
-  companyName: string,
-  websiteContent?: string,
-  model?: string
-): Promise<{
-  name: string
-  main_business: string
-  products: string[]
-  scale: string
-  country: string
-  country_code: string
-  confidence: number
-}> {
-  const content = websiteContent || "（无官网内容，仅基于公司名称分析）"
-
-  const prompt = COMPANY_ANALYSIS_PROMPT
-    .replace("{companyName}", companyName)
-    .replace("{websiteContent}", content)
-
-  const response = await openRouterChatCompletion(
-    [
-      {
-        role: "system",
-        content:
-          "You are a precise company analyst. Always respond with valid JSON only, no markdown code blocks.",
-      },
-      { role: "user", content: prompt },
-    ],
-    model || "anthropic/claude-3.5-haiku",
-    400
+  const raw = await chatComplete(
+    [{ role: "system", content: "Respond JSON only." },
+     { role: "user", content: prompt }],
+    model, 400
   )
 
-  // 清理可能的 markdown JSON 包装
-  const jsonStr = response.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim()
-
-  try {
-    return JSON.parse(jsonStr)
-  } catch {
-    return {
-      name: companyName,
-      main_business: "未能明确分析，请补充官网链接",
-      products: ["未知"],
-      scale: "待确认",
-      country: "未知",
-      country_code: "UNKNOWN",
-      confidence: 0.2,
-    }
+  const json = raw.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim()
+  try { return JSON.parse(json) } catch {
+    return { name, main_business: "分析失败", products: ["未知"],
+             scale: "未知", country: "未知", country_code: "UNKNOWN", confidence: 0.1 }
   }
 }
 
-export async function generateIcebreaker(
-  params: {
-    companyName: string
-    mainBusiness: string
-    products: string[]
-    scale: string
-    countryName: string
-    standardSystem: string[]
-    standardCodes: string[]
-    language: string
+export async function generateOpener(
+  p: {
+    company: string; biz: string; products: string[];
+    scale: string; country: string; stds: string[]; lang: string
   },
-  model?: string
-): Promise<{ text: string; language: string }> {
+  model: string
+) {
   const prompt = ICEBREAKER_PROMPT
-    .replace("{companyName}", params.companyName)
-    .replace("{mainBusiness}", params.mainBusiness)
-    .replace("{products}", params.products.join("、"))
-    .replace("{scale}", params.scale)
-    .replace("{country}", params.countryName)
-    .replace("{standardSystem}", params.standardSystem.join(" / "))
-    .replace("{standardCodes}", params.standardCodes.join("、"))
-    .replace("{language}", params.language)
+    .replace("{lang}", p.lang)
+    .replace("{company}", p.company)
+    .replace("{biz}", p.biz)
+    .replace("{products}", p.products.join("、"))
+    .replace("{scale}", p.scale)
+    .replace("{country}", p.country)
+    .replace("{stds}", p.stds.join(" / "))
 
-  const response = await openRouterChatCompletion(
-    [
-      {
-        role: "system",
-        content:
-          "You are a professional B2B sales consultant. Only respond with the opener text, no explanations.",
-      },
-      { role: "user", content: prompt },
-    ],
-    model || "anthropic/claude-3.5-haiku",
-    300
+  const text = await chatComplete(
+    [{ role: "system", content: "Reply with opener text only." },
+     { role: "user", content: prompt }],
+    model, 300
   )
-
-  return {
-    text: response.trim(),
-    language: params.language,
-  }
+  return { text: text.trim(), language: p.lang }
 }
