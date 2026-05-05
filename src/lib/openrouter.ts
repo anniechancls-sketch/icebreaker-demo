@@ -94,29 +94,63 @@ Rules:
 - NEVER make up company details that are not supported by the search results
 - customer_type must be one of: distributor, contractor, manufacturer, project_developer, municipal, retailer, other`
 
+// ─── 日丰公司背景（用于话术生成）────────────────────────────
+const RIFENG_PROFILE = `
+【日丰企业集团 / RIFENG Enterprise Group Co., Ltd.】
+- 成立：1996年，总部广东佛山
+- 定位：We Are Global Piping System Supplier
+- 主营产品：
+  · Multilayer Pipe（多层管道）
+  · PEX Pipe、PP-R Pipe、PE-RT Pipe
+  · PPSU Multi-Jaw Press Fittings（F18U系列）
+  · PVC排水系统、PVC穿线管
+  · HDPE市政管道
+  · 燃气管道系统、地暖系统、空调管道系统
+- 认证：覆盖17个国家，国际认证体系
+- 知名项目：
+  · 北京冬奥会村（80%管道来自日丰）
+  · 南非：York酒店(德班)、Lesego医院(约翰内斯堡)、Kempton塔
+  · 埃塞俄比亚：Fa Haset房地产- Highlander项目（亚的斯亚贝巴）
+  · 阿塞拜疆：最高法院、国家癌症医院
+  · 泰国：One City Centre (OCC)
+  · 爱沙尼亚：MAXIMA物流中心、Hedon Spa & Hotel
+  · 秘鲁：EL Molino、Sede La Tiza
+- 2026年参展MCE（意大利米兰，暖通/水务/能源展）
+- 2025年发布首个可持续发展报告（对标欧盟CSRD）
+- 联系：marketing@rifeng.com
+`
+
 // ─── 破冰话术 Prompt ────────────────────────────────────────
-const ICEBREAKER_PROMPT = `你是日丰企业集团（Rifong Enterprise）的海外业务员。日丰是中国塑料管道行业领先企业，主营 PE、PVC、PPR、HDPE 等管道产品，广泛应用于给水、排水、消防、地暖、市政工程、农业灌溉等领域。
+const ICEBREAKER_PROMPT = `你是日丰企业集团（RIFENG Enterprise Group Co., Ltd.）的海外业务员。RIFENG是中国塑料管道行业领先企业，1996年成立，总部佛山禅城，在全球17个国家有认证和项目案例。
 
-Your identity: 日丰塑料管道领先企业的专业业务员
+## 日丰核心信息：
+${RIFENG_PROFILE}
 
-Company you are contacting: {company}
-Customer type: {customer_type}
-Customer business: {biz}
-Customer products: {products}
-Customer country: {country}
-Relevant pipe standards in their country: {stds}
+## 目标客户信息：
+- 客户公司：{company}
+- 客户类型：{customer_type}（{customer_type_label}）
+- 主营业务：{biz}
+- 产品方向：{products}
+- 目标国家：{country}
+- 该国管道标准：{stds}
 
-Write a 120-160 word cold outreach opener in {lang}.
+## 任务：
+根据客户类型，撰写一段 120-160 字的英文/当地语言开场白。
 
-Rules based on customer type:
-- distributor (批发商): Emphasize product range advantage, supply stability, bulk pricing
-- contractor (工程施工): Emphasize product quality, installation ease, project reference cases
-- manufacturer (制造商): Emphasize raw material quality, certification compliance, OEM capability
-- project_developer (项目开发商): Emphasize project track record, large-scale supply capacity, certification coverage
-- municipal (市政/政府采购): Emphasize certifications, compliance with national standards, long-term reliability
-- retailer (零售商): Emphasize brand support, marketing materials, consumer demand fit
+## 客户类型差异化策略：
+- distributor（建材批发商）：突出日丰产品线齐全（从管道到管件全覆盖）、供货稳定、批量价格优势；可提及多国认证便于转口
+- contractor（工程施工方）：突出日丰产品质量（多国认证）、安装便捷（F18U PPSU快接管件）、项目案例丰富（冬奥会、南非医院等）
+- manufacturer（制造商）：突出日丰原材料品质、国际认证合规、OEM合作经验
+- project_developer（项目开发商）：突出日丰大规模供货能力（百万米/年产能）、全球项目案例、认证覆盖广
+- municipal（市政/政府采购）：突出日丰认证合规性（17国）、北京冬奥会等国家级项目经验、可持续发展承诺
+- retailer（零售商）：突出日丰品牌支持、市场推广材料、消费者口碑
 
-Style: Professional but warm, knowledgeable about their market, specific to their country and standards, no generic filler.
+## 话术风格要求：
+- 专业、热情、有温度，不生硬
+- 开头先提及客户公司的具体业务或所在国家，体现做过功课
+- 中段自然过渡到日丰与客户的契合点
+- 结尾明确下一步（期待合作/发送产品目录等）
+- 不要写任何RIFENG不存在的信息
 
 Output ONLY the opener text in {lang} language.`
 
@@ -185,6 +219,7 @@ export async function generateOpener(
     .replace("{lang}", p.lang)
     .replace("{company}", p.company)
     .replace("{customer_type}", p.customer_type)
+    .replace("{customer_type_label}", customerTypeLabel(p.customer_type))
     .replace("{biz}", p.biz)
     .replace("{products}", p.products.join("、"))
     .replace("{scale}", p.scale)
@@ -193,7 +228,7 @@ export async function generateOpener(
 
   const text = await chatComplete(
     [
-      { role: "system", content: "You are a professional overseas sales representative for Rifong Enterprise, a leading Chinese plastic pipe manufacturer. Write a natural, professional cold outreach message." },
+      { role: "system", content: "You are a professional overseas sales representative for RIFENG Enterprise Group Co., Ltd., a leading Chinese plastic pipe manufacturer established in 1996, headquartered in Foshan, China. Write a natural, professional cold outreach message. Use ONLY factual information about RIFENG." },
       { role: "user", content: prompt }
     ],
     model, 350
