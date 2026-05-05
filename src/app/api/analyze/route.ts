@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { analyzeCompany, generateOpener, chatComplete } from "@/lib/openrouter"
+import { analyzeCompany, generateOpener } from "@/lib/openrouter"
+import { searchCompanyInfo } from "@/lib/search"
 import { getStandardsByCountry, getCountryLanguage } from "@/lib/standards"
 
 export const runtime = "nodejs"
@@ -17,64 +18,6 @@ function inferCountry(text: string): string {
   if (/india|, in\b|mumbai|delhi/i.test(t))            return "IN"
   return "UNKNOWN"
 }
-
-// ─── 联网研究未知国家标准 ───────────────────────────────
-
-async function researchStandardsForCountry(country: string, model: string) {
-  const prompt = `You are a pipe and plumbing standards researcher. Research the pipe/plumbing standards for ${country}.
-
-Search the web for:
-1. What pipe standards are used in ${country}? (ISO, EN, national standard like GOST, SNI, etc.)
-2. What are the common pipe materials and pressure ratings?
-3. What certifications are required for pipe products to enter this market?
-4. Who are the major pipe manufacturers or brands in this country?
-
-Respond ONLY with valid JSON in this exact format:
-{
-  "country": "${country}",
-  "code": "XX",
-  "language": "English / local language",
-  "standard_system": ["standard1", "standard2"],
-  "standards": [
-    {"code": "STD001", "name": "Standard name", "desc": "Description of what this standard covers"}
-  ],
-  "certifications": ["cert1", "cert2"],
-  "market_notes": "Brief market overview in 1-2 sentences"
-}
-
-Rules:
-- If ${country} uses GOST/俄标, include Russian GOST standards
-- If ${country} uses EN/欧盟标准, include EN standards
-- If ${country} has local standards (SNI for Indonesia, PSB for Singapore, etc.), include those
-- If you're unsure about specific standard codes, use your best knowledge but flag as "inferred"
-- Always include at least 3 standards
-- Return ONLY the JSON, no markdown fences`
-
-  const raw = await chatComplete(
-    [
-      { role: "system", content: "You are a technical research assistant. Always respond with valid JSON only." },
-      { role: "user", content: prompt }
-    ],
-    model, 600
-  )
-
-  const json = raw.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim()
-  try {
-    return JSON.parse(json)
-  } catch {
-    return {
-      country,
-      code: "UNKNOWN",
-      language: "English",
-      standard_system: ["UNKNOWN"],
-      standards: [{ code: "N/A", name: "标准待补充", desc: `系统尚未收录${country}的管道标准，请联系IT添加` }],
-      certifications: [],
-      market_notes: "标准数据待补充",
-    }
-  }
-}
-
-// ─── 主入口 ─────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   const rid = Math.random().toString(36).slice(2, 10)
@@ -96,9 +39,13 @@ export async function POST(req: NextRequest) {
 
     const model = selectedModel || "anthropic/claude-3.5-haiku"
 
-    // 1. 抓取官网（容错）
+    // ─── 步骤1：联网搜索公司 ───────────────────────────────
+    console.log(`[${rid}] Step1: Searching company online...`)
+    const searchResult = await searchCompanyInfo(companyName.trim())
+    console.log(`[${rid}] Search got ${searchResult.sources.length} sources, content len=${searchResult.content.length}`)
+
+    // ─── 步骤2：抓取官网（容错）───────────────────────────
     let webContent = ""
-    let webSource = ""
     if (websiteUrl) {
       try {
         const jinaResp = await fetch(
@@ -108,55 +55,68 @@ export async function POST(req: NextRequest) {
         if (jinaResp.ok) {
           webContent = (await jinaResp.text())
             .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 6000)
-          webSource = websiteUrl
         }
       } catch (e: any) {
         console.warn(`[${rid}] Jina failed:`, e.message)
       }
     }
 
-    // 2. AI 公司分析
-    console.log(`[${rid}] Calling analyzeCompany...`)
-    const company = await analyzeCompany(companyName.trim(), webContent, model)
-    console.log(`[${rid}] OK`, JSON.stringify(company))
+    // ─── 步骤3：AI公司分析（基于真实搜索结果）─────────────
+    console.log(`[${rid}] Step2: Calling analyzeCompany...`)
+    const company = await analyzeCompany(
+      companyName.trim(),
+      searchResult.content,
+      webContent,
+      model
+    )
+    console.log(`[${rid}] OK`, JSON.stringify(company).slice(0, 200))
 
-    // 3. 确定国家
+    // ─── 步骤4：确定国家标准 ──────────────────────────────
     let cc = company.country_code || "UNKNOWN"
     if (cc === "UNKNOWN" || !getStandardsByCountry(cc)) {
-      cc = inferCountry(companyName + " " + (websiteUrl || ""))
+      cc = inferCountry(companyName + " " + (websiteUrl || "") + " " + (company.country || ""))
     }
 
-    // 4. 选择标准数据
-    let stds: any = getStandardsByCountry(cc)
+    let stds = getStandardsByCountry(cc)
     let standards_source: "knowledge_base" | "auto_researched" = "knowledge_base"
 
     if (!stds) {
-      // 未知国家 → 联网研究
-      console.log(`[${rid}] Unknown country ${cc}, researching standards online...`)
       standards_source = "auto_researched"
-      try {
-        stds = await researchStandardsForCountry(company.country || cc, model)
-        console.log(`[${rid}] Researched standards:`, JSON.stringify(stds).slice(0, 200))
-      } catch (e: any) {
-        console.warn(`[${rid}] Standards research failed:`, e.message)
-        // 研究失败则降级到美国标准
-        stds = getStandardsByCountry("US")!
-        standards_source = "knowledge_base"
-      }
+      console.warn(`[${rid}] Country ${cc} not in knowledge base, using US defaults`)
+      stds = getStandardsByCountry("US")!
     }
 
-    // 5. AI 话术生成
-    console.log(`[${rid}] Calling generateOpener...`)
+    const autoDetected = cc !== (company.country_code || "UNKNOWN")
+
+    // ─── 步骤5：AI话术生成（含客户类型）───────────────────
+    console.log(`[${rid}] Step3: Calling generateOpener...`)
     const opener = await generateOpener({
       company: companyName.trim(),
-      biz: company.main_business,
+      customer_type: company.customer_type || "other",
+      biz: company.main_business || "未知",
       products: company.products || ["未知"],
       scale: company.scale || "未知",
-      country: stds.country || company.country || "未知",
+      country: company.country || stds.country || "未知",
       stds: (stds.standards || []).map((s: any) => s.code),
-      lang: stds.language || getCountryLanguage(cc),
+      lang: getCountryLanguage(cc),
     }, model)
     console.log(`[${rid}] DONE`)
+
+    // ─── 整理数据来源 ────────────────────────────────────
+    const sources: Array<{ type: string; url?: string; title?: string; desc: string }> = []
+
+    // 搜索结果 → search_result 来源
+    searchResult.sources.forEach((s) => {
+      sources.push({ type: "search_result", url: s.url, title: s.title, desc: `搜索结果: ${s.title}` })
+    })
+
+    // 官网 URL → website 来源
+    if (websiteUrl) {
+      sources.push({ type: "website", url: websiteUrl, title: "官网", desc: "官网内容" })
+    }
+
+    // 知识库
+    sources.push({ type: "knowledge_base", desc: `管道标准知识库 (${stds.country})` })
 
     return NextResponse.json({
       success: true,
@@ -164,18 +124,14 @@ export async function POST(req: NextRequest) {
         company: {
           name: company.name || companyName,
           main_business: company.main_business || "未知",
+          customer_type: company.customer_type || "other",
+          customer_type_label: customerTypeLabel(company.customer_type),
           products: company.products || ["未知"],
           scale: company.scale || "未知",
           confidence: company.confidence || 0.5,
           inferred_country: company.country || stds.country || cc,
           inferred_country_code: company.country_code || cc,
-          // 数据来源
-          sources: (company.sources || []).map((s: string) => {
-            if (s.startsWith("website|")) {
-              return { type: "website", url: s.replace("website|", ""), desc: "公司官网" }
-            }
-            return { type: "inferred", desc: s }
-          }),
+          sources,
         },
         standards: {
           country: stds.country,
@@ -184,7 +140,7 @@ export async function POST(req: NextRequest) {
           standards: stds.standards,
           certifications: stds.certifications,
           source: standards_source,
-          auto_detected: cc !== (company.country_code || "UNKNOWN"),
+          auto_detected: autoDetected,
         },
         icebreaker: opener,
       },
@@ -206,4 +162,17 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+function customerTypeLabel(t?: string): string {
+  const map: Record<string, string> = {
+    distributor: "批发商",
+    contractor: "工程施工",
+    manufacturer: "制造商",
+    project_developer: "项目开发商",
+    municipal: "市政/政府采购",
+    retailer: "零售商",
+    other: "其他",
+  }
+  return map[t || "other"] || "其他"
 }

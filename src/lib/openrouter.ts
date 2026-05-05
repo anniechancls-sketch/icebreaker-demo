@@ -14,7 +14,6 @@ export async function chatComplete(
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set")
 
   const vercelUrl = process.env.VERCEL_URL
-  // 强制 ASCII referer，避免 Node 24 TextEncoder 对 Unicode 的 bug
   const referer = vercelUrl
     ? `https://${vercelUrl.replace(/[^\x00-\x7F]/g, '')}`
     : "https://icebreaker-demo.vercel.app"
@@ -25,7 +24,6 @@ export async function chatComplete(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": referer,
-      // 改用 ASCII only 的 title，避免 TextEncoder 异常
       "X-Title": "Icebreaker Demo",
     },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
@@ -61,67 +59,132 @@ export const BUILTIN_MODELS = [
 
 // ─── Prompts ─────────────────────────────────────────────────
 
-const COMPANY_PROMPT = `You are a B2B company research analyst. Respond ONLY with valid JSON.
+// ─── 公司分析 Prompt ────────────────────────────────────────
+const COMPANY_PROMPT = `You are a B2B company research analyst specializing in the building materials and plumbing pipe industry. You MUST use real-time web search results to gather facts. Respond ONLY with valid JSON.
 
-Company: {name}
-Website content: {content}
+Company to research: {name}
 
-JSON:
-{"name":"...","main_business":"...","products":["...","..."],"scale":"...","country":"...","country_code":"...","confidence":0.0,"sources":["source1|description","source2|description"]}
+Web search results (use these as primary source):
+{search_content}
 
-Rules for sources:
-- Always include the company website URL (if known) as the FIRST source, format: "website|{url}"
-- Include any other URLs you used (LinkedIn, Wikipedia, news) as separate entries
-- If information was inferred (not from a specific URL), note it as: "inferred|from company name analysis"
-- At minimum, always include at least one source
+Your task:
+1. Based on the web search results above, identify the company
+2. Determine its main business model: distributor (批发商), contractor (工程施工), manufacturer (制造商), project developer (项目开发商), municipal/government (市政/政府采购), retailer (零售商), or other
+3. Extract: main products, estimated scale, country
 
-Example sources field:
-["website|https://www.uponor.com/about-us","inferred|from company name and industry context"]`
+JSON format (ALL fields required):
+{
+  "name": "official company name",
+  "main_business": "1-2 sentence description of what this company does",
+  "customer_type": "distributor|contractor|manufacturer|project_developer|municipal|retailer|other",
+  "products": ["product1", "product2"],
+  "scale": "estimated company size (employees/revenue range if available)",
+  "country": "country name in Chinese",
+  "country_code": "2-letter ISO code",
+  "confidence": 0.0-1.0 (how certain are you based on web sources),
+  "sources": [
+    {"url": "https://...", "title": "page title or source name", "type": "search_result|website|linkedin|wiki|news"}
+  ]
+}
 
-const ICEBREAKER_PROMPT = `Write a 100-150 word professional cold outreach opener in {lang}.
+Rules:
+- Use web search results as primary evidence. If search results are empty or vague, set confidence to 0.3 and note in sources
+- At minimum include one source URL from the search results provided
+- If the company cannot be identified from search results, return: confidence:0.1, customer_type:"unknown", sources:[]
+- NEVER make up company details that are not supported by the search results
+- customer_type must be one of: distributor, contractor, manufacturer, project_developer, municipal, retailer, other`
 
-Company: {company}
-Business: {biz}
-Products: {products}
-Country: {country}
-Standards: {stds}
+// ─── 破冰话术 Prompt ────────────────────────────────────────
+const ICEBREAKER_PROMPT = `你是日丰企业集团（Rifong Enterprise）的海外业务员。日丰是中国塑料管道行业领先企业，主营 PE、PVC、PPR、HDPE 等管道产品，广泛应用于给水、排水、消防、地暖、市政工程、农业灌溉等领域。
 
-Write ONLY the opener text.`
+Your identity: 日丰塑料管道领先企业的专业业务员
 
-// ─── 导出 ────────────────────────────────────────────────────
+Company you are contacting: {company}
+Customer type: {customer_type}
+Customer business: {biz}
+Customer products: {products}
+Customer country: {country}
+Relevant pipe standards in their country: {stds}
+
+Write a 120-160 word cold outreach opener in {lang}.
+
+Rules based on customer type:
+- distributor (批发商): Emphasize product range advantage, supply stability, bulk pricing
+- contractor (工程施工): Emphasize product quality, installation ease, project reference cases
+- manufacturer (制造商): Emphasize raw material quality, certification compliance, OEM capability
+- project_developer (项目开发商): Emphasize project track record, large-scale supply capacity, certification coverage
+- municipal (市政/政府采购): Emphasize certifications, compliance with national standards, long-term reliability
+- retailer (零售商): Emphasize brand support, marketing materials, consumer demand fit
+
+Style: Professional but warm, knowledgeable about their market, specific to their country and standards, no generic filler.
+
+Output ONLY the opener text in {lang} language.`
+
+// ─── 导出函数 ───────────────────────────────────────────────
 
 export async function analyzeCompany(
   name: string,
-  content: string,
+  searchContent: string,
+  websiteContent: string,
   model: string
 ) {
   const prompt = COMPANY_PROMPT
     .replace("{name}", name)
-    .replace("{content}", content || "（no website content）")
+    .replace("{search_content}", searchContent || "（no search results available）")
 
   const raw = await chatComplete(
-    [{ role: "system", content: "Respond JSON only." },
-     { role: "user", content: prompt }],
-    model, 400
+    [
+      { role: "system", content: "You are a professional B2B research analyst. Always respond with valid JSON only. Never invent facts not supported by sources." },
+      { role: "user", content: prompt }
+    ],
+    model, 500
   )
 
   const json = raw.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim()
-  try { return JSON.parse(json) } catch {
-    return { name, main_business: "分析失败", products: ["未知"],
-             scale: "未知", country: "未知", country_code: "UNKNOWN", confidence: 0.1 }
+  try {
+    const result = JSON.parse(json)
+    // Normalize sources format
+    if (result.sources && Array.isArray(result.sources) && typeof result.sources[0] === "string") {
+      result.sources = (result.sources as string[]).map((s: string) => {
+        if (s.startsWith("website|")) {
+          return { type: "website", url: s.replace("website|", ""), title: "" }
+        }
+        return { type: "inferred", url: "", title: s }
+      })
+    }
+    return result
+  } catch {
+    return {
+      name,
+      main_business: "分析失败",
+      customer_type: "other",
+      products: ["未知"],
+      scale: "未知",
+      country: "未知",
+      country_code: "UNKNOWN",
+      confidence: 0.1,
+      sources: []
+    }
   }
 }
 
 export async function generateOpener(
   p: {
-    company: string; biz: string; products: string[];
-    scale: string; country: string; stds: string[]; lang: string
+    company: string
+    customer_type: string
+    biz: string
+    products: string[]
+    scale: string
+    country: string
+    stds: string[]
+    lang: string
   },
   model: string
 ) {
   const prompt = ICEBREAKER_PROMPT
     .replace("{lang}", p.lang)
     .replace("{company}", p.company)
+    .replace("{customer_type}", p.customer_type)
     .replace("{biz}", p.biz)
     .replace("{products}", p.products.join("、"))
     .replace("{scale}", p.scale)
@@ -129,9 +192,11 @@ export async function generateOpener(
     .replace("{stds}", p.stds.join(" / "))
 
   const text = await chatComplete(
-    [{ role: "system", content: "Reply with opener text only." },
-     { role: "user", content: prompt }],
-    model, 300
+    [
+      { role: "system", content: "You are a professional overseas sales representative for Rifong Enterprise, a leading Chinese plastic pipe manufacturer. Write a natural, professional cold outreach message." },
+      { role: "user", content: prompt }
+    ],
+    model, 350
   )
   return { text: text.trim(), language: p.lang }
 }

@@ -6,12 +6,14 @@ type ResultData = {
   company: {
     name: string
     main_business: string
+    customer_type: string
+    customer_type_label: string
     products: string[]
     scale: string
     confidence: number
     inferred_country: string
     inferred_country_code: string
-    sources: Array<{ type: string; url?: string; desc: string }>
+    sources: Array<{ type: string; url?: string; title?: string; desc: string }>
   }
   standards: {
     country: string
@@ -39,7 +41,6 @@ export default function HomePage() {
   const [selectedModel, setSelectedModel] = useState("anthropic/claude-3.5-haiku")
 
   useEffect(() => {
-    // 从 localStorage 读取上次使用的模型
     const saved = localStorage.getItem("icebreaker_model")
     if (saved) setSelectedModel(saved)
   }, [])
@@ -90,7 +91,6 @@ export default function HomePage() {
         <p>输入客户公司名，AI 自动分析 + 生成专业破冰话术</p>
       </div>
 
-      {/* 顶部操作栏：模型选择入口 */}
       <div style={{ textAlign: "right", marginBottom: "1rem" }}>
         <a href="/admin" style={{ fontSize: "0.8rem", color: "#64748b", textDecoration: "none" }}>
           ⚙️ 模型管理
@@ -142,20 +142,17 @@ export default function HomePage() {
         </form>
       </div>
 
-      {/* 错误提示 */}
       {error && <div className="error-msg">{error}</div>}
 
-      {/* 加载中 */}
       {loading && (
         <div className="card">
           <div className="loading">
             <span className="spinner" />
-            正在分析公司、识别国家、生成话术，请稍候...
+            联网搜索公司信息、分析情报、生成话术，请稍候...
           </div>
         </div>
       )}
 
-      {/* 结果展示 */}
       {result && (
         <>
           {/* 知识库扩展提示（首次遇到该国家） */}
@@ -202,6 +199,15 @@ export default function HomePage() {
               <span className="result-value">{result.company.main_business}</span>
             </div>
             <div className="result-item">
+              <span className="result-label">客户类型</span>
+              <span className="result-value">
+                {result.company.customer_type_label}
+                <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem", color: "#64748b" }}>
+                  ({result.company.customer_type})
+                </span>
+              </span>
+            </div>
+            <div className="result-item">
               <span className="result-label">产品类型</span>
               <div className="result-tags">
                 {result.company.products.map((p) => (
@@ -228,10 +234,12 @@ export default function HomePage() {
                 <span className="result-label">数据来源</span>
                 {result.company.sources.map((s, i) => (
                   <span key={i} style={{ fontSize: "0.78rem", color: "#64748b" }}>
-                    {s.type === "website" ? (
-                      <>🔗 <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb" }}>{s.url}</a> — {s.desc}</>
+                    {s.type === "search_result" && s.url ? (
+                      <>&#128269; <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb" }}>{s.title || s.url}</a></>
+                    ) : s.type === "website" && s.url ? (
+                      <>&#128279; <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb" }}>{s.title || s.url}</a></>
                     ) : (
-                      <>💡 {s.desc}</>
+                      <>&#128221; {s.desc}
                     )}
                   </span>
                 ))}
@@ -285,7 +293,11 @@ export default function HomePage() {
 
           {/* 破冰话术 */}
           <div className="card">
-            <div className="card-title">💬 破冰话术</div>
+            <div className="card-title">💬 破冰话术
+              <span style={{ fontSize: "0.7rem", fontWeight: "normal", color: "#64748b", marginLeft: "0.5rem" }}>
+                日丰业务员 · {result.company.customer_type_label}视角
+              </span>
+            </div>
             <div style={{ fontSize: "0.75rem", color: "#64748b", marginBottom: "0.75rem" }}>
               语言：{result.icebreaker.language} &nbsp;·&nbsp; 模型：{result.selected_model}
             </div>
