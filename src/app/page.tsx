@@ -1,12 +1,6 @@
 "use client"
 
-import { useState } from "react"
-
-const COUNTRIES = [
-  { code: "US", name: "🇺🇸 美国", nameEn: "United States" },
-  { code: "PL", name: "🇵🇱 波兰", nameEn: "Poland" },
-  { code: "FR", name: "🇫🇷 法国", nameEn: "France" },
-]
+import { useState, useEffect } from "react"
 
 type ResultData = {
   company: {
@@ -15,6 +9,8 @@ type ResultData = {
     products: string[]
     scale: string
     confidence: number
+    inferred_country: string
+    inferred_country_code: string
   }
   standards: {
     country: string
@@ -22,21 +18,29 @@ type ResultData = {
     standard_system: string[]
     standards: Array<{ code: string; name: string; desc: string }>
     certifications: string[]
+    auto_detected: boolean
   }
   icebreaker: {
     text: string
     language: string
   }
+  selected_model: string
 }
 
 export default function HomePage() {
   const [companyName, setCompanyName] = useState("")
   const [websiteUrl, setWebsiteUrl] = useState("")
-  const [countryCode, setCountryCode] = useState("US")
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ResultData | null>(null)
   const [error, setError] = useState("")
   const [copied, setCopied] = useState(false)
+  const [selectedModel, setSelectedModel] = useState("anthropic/claude-3.5-haiku")
+
+  useEffect(() => {
+    // 从 localStorage 读取上次使用的模型
+    const saved = localStorage.getItem("icebreaker_model")
+    if (saved) setSelectedModel(saved)
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -53,7 +57,7 @@ export default function HomePage() {
         body: JSON.stringify({
           companyName: companyName.trim(),
           websiteUrl: websiteUrl.trim() || undefined,
-          countryCode,
+          selectedModel,
         }),
       })
 
@@ -63,7 +67,7 @@ export default function HomePage() {
         throw new Error(data.error || "分析失败，请重试")
       }
 
-      setResult(data.data)
+      setResult({ ...data.data, selected_model: selectedModel })
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -84,11 +88,18 @@ export default function HomePage() {
         <p>输入客户公司名，AI 自动分析 + 生成专业破冰话术</p>
       </div>
 
+      {/* 顶部操作栏：模型选择入口 */}
+      <div style={{ textAlign: "right", marginBottom: "1rem" }}>
+        <a href="/admin" style={{ fontSize: "0.8rem", color: "#64748b", textDecoration: "none" }}>
+          ⚙️ 模型管理
+        </a>
+      </div>
+
       {/* 输入表单 */}
       <div className="card">
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">客户公司名称</label>
+            <label className="form-label">客户公司名称 <span style={{ color: "#dc2626" }}>*</span></label>
             <input
               type="text"
               className="form-input"
@@ -101,7 +112,7 @@ export default function HomePage() {
 
           <div className="form-group">
             <label className="form-label">
-              官网链接 <span className="optional">（可选）</span>
+              官网链接 <span className="optional">（可选，信息更丰富）</span>
             </label>
             <input
               type="url"
@@ -110,36 +121,6 @@ export default function HomePage() {
               value={websiteUrl}
               onChange={(e) => setWebsiteUrl(e.target.value)}
             />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">目标国家</label>
-            <div style={{ position: "relative" }}>
-              <select
-                className="form-select"
-                value={countryCode}
-                onChange={(e) => setCountryCode(e.target.value)}
-                style={{ paddingRight: "2rem" }}
-              >
-                {COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <span
-                style={{
-                  position: "absolute",
-                  right: "0.75rem",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  pointerEvents: "none",
-                  fontSize: "0.7rem",
-                }}
-              >
-                ▼
-              </span>
-            </div>
           </div>
 
           <button
@@ -167,7 +148,7 @@ export default function HomePage() {
         <div className="card">
           <div className="loading">
             <span className="spinner" />
-            正在抓取官网、分析公司、生成话术，请稍候...
+            正在分析公司、识别国家、生成话术，请稍候...
           </div>
         </div>
       )}
@@ -175,6 +156,22 @@ export default function HomePage() {
       {/* 结果展示 */}
       {result && (
         <>
+          {/* 提示：国家是否自动推断 */}
+          {result.standards.auto_detected && (
+            <div style={{
+              background: "#fffbeb",
+              border: "1px solid #fde68a",
+              color: "#92400e",
+              padding: "0.6rem 1rem",
+              borderRadius: "8px",
+              fontSize: "0.8rem",
+              marginBottom: "1rem"
+            }}>
+              💡 系统自动识别到该客户位于 <strong>{result.company.inferred_country}</strong>，
+              并已加载对应管道标准。如需调整，请联系管理员添加该国标准库。
+            </div>
+          )}
+
           {/* 公司情报 */}
           <div className="card">
             <div className="card-title">🏢 公司情报</div>
@@ -190,9 +187,7 @@ export default function HomePage() {
               <span className="result-label">产品类型</span>
               <div className="result-tags">
                 {result.company.products.map((p) => (
-                  <span key={p} className="tag">
-                    {p}
-                  </span>
+                  <span key={p} className="tag">{p}</span>
                 ))}
               </div>
             </div>
@@ -200,16 +195,14 @@ export default function HomePage() {
               <span className="result-label">规模估算</span>
               <span className="result-value">
                 {result.company.scale}
-                <span
-                  style={{
-                    marginLeft: "0.5rem",
-                    fontSize: "0.75rem",
-                    color: "#16a34a",
-                  }}
-                >
+                <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem", color: "#16a34a" }}>
                   置信度 {Math.round(result.company.confidence * 100)}%
                 </span>
               </span>
+            </div>
+            <div className="result-item">
+              <span className="result-label">推断国家</span>
+              <span className="result-value">{result.company.inferred_country}</span>
             </div>
           </div>
 
@@ -226,9 +219,7 @@ export default function HomePage() {
               <span className="result-label">标准体系</span>
               <div className="result-tags">
                 {result.standards.standard_system.map((s) => (
-                  <span key={s} className="tag green">
-                    {s}
-                  </span>
+                  <span key={s} className="tag green">{s}</span>
                 ))}
               </div>
             </div>
@@ -247,9 +238,7 @@ export default function HomePage() {
               <span className="result-label">认证要求</span>
               <div className="result-tags">
                 {result.standards.certifications.map((c) => (
-                  <span key={c} className="tag">
-                    {c}
-                  </span>
+                  <span key={c} className="tag">{c}</span>
                 ))}
               </div>
             </div>
@@ -259,13 +248,10 @@ export default function HomePage() {
           <div className="card">
             <div className="card-title">💬 破冰话术</div>
             <div style={{ fontSize: "0.75rem", color: "#64748b", marginBottom: "0.75rem" }}>
-              语言：{result.icebreaker.language}
+              语言：{result.icebreaker.language} &nbsp;·&nbsp; 模型：{result.selected_model}
             </div>
             <div className="icebreaker-text">{result.icebreaker.text}</div>
-            <button
-              className="btn-copy"
-              onClick={() => handleCopy(result.icebreaker.text)}
-            >
+            <button className="btn-copy" onClick={() => handleCopy(result.icebreaker.text)}>
               {copied ? "✅ 已复制" : "📋 复制话术"}
             </button>
           </div>
@@ -275,7 +261,7 @@ export default function HomePage() {
       <div className="footer">
         <p>日丰企业集团 IT部 · 海外数字化产品团队</p>
         <p style={{ marginTop: "0.3rem", opacity: 0.6 }}>
-          Powered by MiniMax AI · Built on Vercel
+          Powered by OpenRouter AI · Built on Vercel
         </p>
       </div>
     </div>
