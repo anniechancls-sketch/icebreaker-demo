@@ -1,6 +1,6 @@
 /**
  * OpenRouter API 调用封装
- * 替换原 MiniMax 实现
+ * 纯 fetch 实现，无任何第三方 AI SDK 依赖
  * API Docs: https://openrouter.ai/docs
  */
 
@@ -20,7 +20,7 @@ interface OpenRouterResponse {
   }
 }
 
-export async function openRouterChatCompletion(
+async function openRouterChatCompletion(
   messages: OpenRouterMessage[],
   model: string = "anthropic/claude-3.5-haiku",
   maxTokens: number = 300
@@ -31,12 +31,16 @@ export async function openRouterChatCompletion(
     throw new Error("OPENROUTER_API_KEY environment variable is not set")
   }
 
+  const referer = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "https://icebreaker-demo.vercel.app"
+
   const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://icebreaker-demo.vercel.app",
+      "HTTP-Referer": referer,
       "X-Title": "海外客户破冰助手",
     },
     body: JSON.stringify({
@@ -51,8 +55,12 @@ export async function openRouterChatCompletion(
     throw new Error(`OpenRouter API error ${response.status}: ${errorText}`)
   }
 
-  const data: OpenRouterResponse = await response.json()
-  return data.choices[0]?.message?.content ?? ""
+  const data = await response.json() as OpenRouterResponse
+  const content = data.choices?.[0]?.message?.content
+  if (!content) {
+    throw new Error("OpenRouter returned empty response")
+  }
+  return content
 }
 
 // ─── 内置模型列表（供模型管理页面使用）──────────────────────
@@ -70,7 +78,7 @@ export const BUILTIN_MODELS = [
   { id: "anthropic/claude-3-opus", name: "Claude 3 Opus", provider: "Anthropic", speed: "慢", cost: "最高" },
 ]
 
-// ─── 公司分析 Prompt ───────────────────────────────────────
+// ─── 公司分析 ───────────────────────────────────────────────
 
 const COMPANY_ANALYSIS_PROMPT = `You are a B2B company research analyst. Based on the following information, analyze this company and respond ONLY with valid JSON (no markdown, no explanation).
 
@@ -92,7 +100,7 @@ Respond with this exact JSON structure:
 If website content is empty or minimal, base your analysis on the company name alone and set confidence below 0.6.
 Only respond with the JSON. No markdown formatting.`
 
-// ─── 破冰话术 Prompt ───────────────────────────────────────
+// ─── 破冰话术 ───────────────────────────────────────────────
 
 const ICEBREAKER_PROMPT = `You are a senior B2B piping & building materials sales consultant.
 
@@ -132,10 +140,9 @@ export async function analyzeCompanyWithAI(
 }> {
   const content = websiteContent || "（无官网内容，仅基于公司名称分析）"
 
-  const prompt = COMPANY_ANALYSIS_PROMPT.replace("{companyName}", companyName).replace(
-    "{websiteContent}",
-    content
-  )
+  const prompt = COMPANY_ANALYSIS_PROMPT
+    .replace("{companyName}", companyName)
+    .replace("{websiteContent}", content)
 
   const response = await openRouterChatCompletion(
     [
@@ -150,6 +157,7 @@ export async function analyzeCompanyWithAI(
     400
   )
 
+  // 清理可能的 markdown JSON 包装
   const jsonStr = response.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim()
 
   try {
@@ -180,7 +188,8 @@ export async function generateIcebreaker(
   },
   model?: string
 ): Promise<{ text: string; language: string }> {
-  const prompt = ICEBREAKER_PROMPT.replace("{companyName}", params.companyName)
+  const prompt = ICEBREAKER_PROMPT
+    .replace("{companyName}", params.companyName)
     .replace("{mainBusiness}", params.mainBusiness)
     .replace("{products}", params.products.join("、"))
     .replace("{scale}", params.scale)
