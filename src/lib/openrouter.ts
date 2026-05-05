@@ -67,7 +67,16 @@ Company: {name}
 Website content: {content}
 
 JSON:
-{"name":"...","main_business":"...","products":["...","..."],"scale":"...","country":"...","country_code":"...","confidence":0.0}`
+{"name":"...","main_business":"...","products":["...","..."],"scale":"...","country":"...","country_code":"...","confidence":0.0,"sources":["source1|description","source2|description"]}
+
+Rules for sources:
+- Always include the company website URL (if known) as the FIRST source, format: "website|{url}"
+- Include any other URLs you used (LinkedIn, Wikipedia, news) as separate entries
+- If information was inferred (not from a specific URL), note it as: "inferred|from company name analysis"
+- At minimum, always include at least one source
+
+Example sources field:
+["website|https://www.uponor.com/about-us","inferred|from company name and industry context"]`
 
 const ICEBREAKER_PROMPT = `Write a 100-150 word professional cold outreach opener in {lang}.
 

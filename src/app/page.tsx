@@ -11,6 +11,7 @@ type ResultData = {
     confidence: number
     inferred_country: string
     inferred_country_code: string
+    sources: Array<{ type: string; url?: string; desc: string }>
   }
   standards: {
     country: string
@@ -19,6 +20,7 @@ type ResultData = {
     standards: Array<{ code: string; name: string; desc: string }>
     certifications: string[]
     auto_detected: boolean
+    source: "knowledge_base" | "auto_researched"
   }
   icebreaker: {
     text: string
@@ -156,8 +158,24 @@ export default function HomePage() {
       {/* 结果展示 */}
       {result && (
         <>
-          {/* 提示：国家是否自动推断 */}
-          {result.standards.auto_detected && (
+          {/* 知识库扩展提示（首次遇到该国家） */}
+          {result.standards.source === "auto_researched" && (
+            <div style={{
+              background: "#eff6ff",
+              border: "1px solid #93c5fd",
+              color: "#1e40af",
+              padding: "0.7rem 1rem",
+              borderRadius: "8px",
+              fontSize: "0.8rem",
+              marginBottom: "1rem"
+            }}>
+              🆕 知识库扩展：系统首次分析来自 <strong>{result.company.inferred_country}</strong> 的客户，
+              已自动联网搜索当地管道标准并补充。如需保存到知识库，请联系 IT 管理员。
+            </div>
+          )}
+
+          {/* 国家自动推断提示 */}
+          {result.standards.auto_detected && result.standards.source === "knowledge_base" && (
             <div style={{
               background: "#fffbeb",
               border: "1px solid #fde68a",
@@ -168,7 +186,7 @@ export default function HomePage() {
               marginBottom: "1rem"
             }}>
               💡 系统自动识别到该客户位于 <strong>{result.company.inferred_country}</strong>，
-              并已加载对应管道标准。如需调整，请联系管理员添加该国标准库。
+              已加载知识库中的管道标准。
             </div>
           )}
 
@@ -204,11 +222,32 @@ export default function HomePage() {
               <span className="result-label">推断国家</span>
               <span className="result-value">{result.company.inferred_country}</span>
             </div>
+            {/* 数据来源 */}
+            {result.company.sources && result.company.sources.length > 0 && (
+              <div className="result-item" style={{ flexDirection: "column", gap: "0.3rem" }}>
+                <span className="result-label">数据来源</span>
+                {result.company.sources.map((s, i) => (
+                  <span key={i} style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                    {s.type === "website" ? (
+                      <>🔗 <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb" }}>{s.url}</a> — {s.desc}</>
+                    ) : (
+                      <>💡 {s.desc}</>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 管道标准 */}
           <div className="card">
-            <div className="card-title">📋 管道标准</div>
+            <div className="card-title">📋 管道标准
+              {result.standards.source === "auto_researched" && (
+                <span style={{ fontSize: "0.7rem", fontWeight: "normal", color: "#2563eb", marginLeft: "0.5rem" }}>
+                  ← 联网研究新补充
+                </span>
+              )}
+            </div>
             <div className="result-item">
               <span className="result-label">国别</span>
               <span className="result-value">
