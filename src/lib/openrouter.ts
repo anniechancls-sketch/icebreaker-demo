@@ -59,6 +59,20 @@ export const BUILTIN_MODELS = [
 
 // ─── Prompts ─────────────────────────────────────────────────
 
+// ─── 客户类型中文标签 ────────────────────────────────────────
+function customerTypeLabel(t?: string): string {
+  const map: Record<string, string> = {
+    distributor: "建材批发商",
+    contractor: "工程施工方",
+    manufacturer: "制造商",
+    project_developer: "项目开发商",
+    municipal: "市政/政府采购",
+    retailer: "零售商",
+    other: "其他",
+  }
+  return map[t || "other"] || "其他"
+}
+
 // ─── 公司分析 Prompt ────────────────────────────────────────
 const COMPANY_PROMPT = `You are a B2B company research analyst specializing in the building materials and plumbing pipe industry. You MUST use real-time web search results to gather facts. Respond ONLY with valid JSON.
 
