@@ -9,14 +9,13 @@ export async function extractWebsiteContent(url: string): Promise<string> {
     const apiUrl = `https://r.jina.ai/${encodeURIComponent(url)}`
     const response = await fetch(apiUrl, {
       headers: {
-        Accept: "application/json",
-        "X-Return-Format": "text",
+        Accept: "text/plain",
       },
-      next: { revalidate: 3600 }, // 缓存 1 小时
+      // 不要在 API route 里用 next.revalidate，会导致问题
     })
 
     if (!response.ok) {
-      throw new Error(`Jina API error: ${response.status}`)
+      throw new Error(`Jina API error: ${response.status} ${response.statusText}`)
     }
 
     const text = await response.text()
@@ -25,9 +24,9 @@ export async function extractWebsiteContent(url: string): Promise<string> {
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 8000) // 限制长度
-  } catch (error) {
-    console.error("Jina extraction failed:", error)
+      .slice(0, 8000)
+  } catch (error: any) {
+    console.error("Jina extraction failed:", error.message)
     throw error
   }
 }
