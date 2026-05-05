@@ -5,7 +5,7 @@
 
 const OR_BASE = "https://openrouter.ai/api/v1"
 
-async function chatComplete(
+export async function chatComplete(
   messages: Array<{ role: string; content: string }>,
   model: string,
   maxTokens: number
