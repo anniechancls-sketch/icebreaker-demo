@@ -32,7 +32,7 @@ export default function AdminPage() {
 
     // 简单密码验证（实际应传到后端，这里简化）
     setTimeout(() => {
-      if (password === adminPassword || password === DEFAULT_ADMIN_PASSWORD) {
+      if (password === adminPassword) {
         localStorage.setItem("icebreaker_admin_auth", "true")
         setAuthenticated(true)
       } else {
