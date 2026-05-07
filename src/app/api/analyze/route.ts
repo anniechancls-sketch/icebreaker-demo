@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { analyzeCompany, generateOpener } from "@/lib/openrouter"
-import { searchCompanyInfo } from "@/lib/search"
+import { searchCompanyInfo, searchStandardsInfo } from "@/lib/search"
 import { getStandardsByCountry, getCountryLanguage } from "@/lib/standards"
 
 export const runtime = "nodejs"
@@ -78,12 +78,22 @@ export async function POST(req: NextRequest) {
     }
 
     let stds = getStandardsByCountry(cc)
-    let standards_source: "knowledge_base" | "auto_researched" = "knowledge_base"
+    let standards_source: "knowledge_base" | "auto_researched" | "us_fallback" = "knowledge_base"
+    let autoResearchNote = ""
 
     if (!stds) {
       standards_source = "auto_researched"
-      console.warn(`[${rid}] Country ${cc} not in knowledge base, using US defaults`)
-      stds = getStandardsByCountry("US")!
+      console.warn(`[${rid}] Country ${cc} not in knowledge base, searching online...`)
+      const searched = await searchStandardsInfo(cc)
+      if (searched) {
+        autoResearchNote = searched
+        console.log(`[${rid}] Auto-researched standards for ${cc}: ${searched.slice(0, 100)}...`)
+      } else {
+        // 联网搜索也失败 → 降级到 US 默认值
+        standards_source = "us_fallback"
+        console.warn(`[${rid}] Online search failed for ${cc}, falling back to US defaults`)
+        stds = getStandardsByCountry("US")!
+      }
     }
 
     const autoDetected = cc !== (company.country_code || "UNKNOWN")
@@ -141,6 +151,7 @@ export async function POST(req: NextRequest) {
           certifications: stds.certifications,
           source: standards_source,
           auto_detected: autoDetected,
+          auto_research_note: autoResearchNote || undefined,
         },
         icebreaker: opener,
       },
