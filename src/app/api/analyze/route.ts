@@ -82,11 +82,13 @@ export async function POST(req: NextRequest) {
     let autoResearchNote = ""
 
     if (!stds) {
-      standards_source = "auto_researched"
       console.warn(`[${rid}] Country ${cc} not in knowledge base, searching online...`)
       const searched = await searchStandardsInfo(cc)
       if (searched) {
+        // 搜索成功：以 US 标准为结构基础，附加搜索到的原始内容
+        standards_source = "auto_researched"
         autoResearchNote = searched
+        stds = getStandardsByCountry("US")!
         console.log(`[${rid}] Auto-researched standards for ${cc}: ${searched.slice(0, 100)}...`)
       } else {
         // 联网搜索也失败 → 降级到 US 默认值
